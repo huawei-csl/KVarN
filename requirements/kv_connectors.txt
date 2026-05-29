@@ -1,4 +1,4 @@
-lmcache >= 0.3.9
+lmcache >= 0.4.5
 # CuPy 14.1.0 imports pytest from cupy.testing._random. Use <14.1.0
 # until a fixed newer release is verified for runtime images.
 cupy-cuda13x < 14.1.0
