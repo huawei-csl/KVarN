@@ -182,6 +182,26 @@ only once its tokens are accepted, so rejected drafts never corrupt history.
 
 ---
 
+### Running on WSL2
+
+KVarN works on WSL2, with two caveats. Both come from system layers (the Windows graphics virtualization model and a vLLM policy), not from any particular hardware.
+
+**1. Keep VRAM allocation under the resident limit.** Under WSL2 the GPU runs through the Windows display driver model (WDDM), which paravirtualizes graphics memory. Allocating past the resident limit does not fail: the system silently spills pages to host RAM, and identical CUDA kernels then run at PCIe speed instead of VRAM speed. KVarN adds an fp16 tail pool on top of weights and KV cache, so a `--gpu-memory-utilization` that fits a plain model can cross the resident limit once KVarN is active. Lower it until the whole working set stays resident.
+
+How far to lower it depends on total VRAM and the model footprint, so locate the edge by measurement. On a 24 GB GPU running Qwen2.5-7B-Instruct, `0.85` still spilled while `0.80` kept everything resident, recovering throughput from 692 to 3523 tok/s at 128 concurrent decodes with quality unchanged.
+
+Diagnostic, the behavioral signature of a spill: `nvidia-smi` shows GPU utilization pinned near 100% while power draw sits near idle. The two signals diverge because the kernels are stalled on the PCIe path rather than doing resident work. Power draw is the reliable signal here; utilization is not. Read the divergence between the two, not a fixed wattage, since the idle baseline varies by device. To watch both signals live:
+
+```
+watch -n 1 'nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv,noheader'
+```
+
+**2. UVA must be enabled.** vLLM disables UVA on WSL2 by policy, which prevents the engine from starting. UVA itself works fine under WSL2, so the fix is to make `is_uva_available()` in `vllm/utils/platform_utils.py` return `True` on WSL2. Re-apply after pulling.
+
+Background and measurements: [issue #15](https://github.com/huawei-csl/KVarN/issues/15).
+
+*Validated on WSL 2.7.3 (kernel 6.6.114), Windows 11 build 26100. The resident limit and silent spill are properties of the WDDM paravirtualization stack, not of any GPU model, and may shift across driver and Windows versions.*
+
 ## How does KVarN work?
 
 <p align="center">
